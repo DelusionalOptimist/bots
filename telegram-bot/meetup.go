@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-co-op/gocron"
 	tbot "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -113,17 +112,19 @@ func addmeetup(ID int64, msgtext string, client mongo.Client) {
 		}
 		bot.Send(tbot.NewMessage(ID, "Meetup added successfully."))
 
-		//making a formatted string from time to pass it to s.At(). This will
-		//specify the time at which the reminder is sent. Currently 2 hours
-		//before the meetup
-		remindTime := fmt.Sprintf("%d:%d", hour-2, minutes)
+		// the time at which the reminder will be sent
+		remindTime := data.Date.Add(time.Hour * -2)
 
-		//making a new scheduler
-		s1 := gocron.NewScheduler(location)
+		// time left before the reminder is to be sent
+		timeLeft := remindTime.Sub(time.Now().In(location))
+		fmt.Println(timeLeft)
 
-		//assigning the scheduler a task and then starting it
-		s1.Every(1).Day().At(remindTime).Do(reminder, ID, client, s1)
-		s1.Start()
+		// sleep till remindTime and then boom
+		go func() {
+			time.Sleep(timeLeft)
+			nextmeetup(ID, client)
+		}()
+
 	} else {
 		bot.Send(tbot.NewMessage(ID, "Please provide the details of meetup"+
 			" in this format - /addmeetup <Title> <DD/MM/YY Hr:Min> <Venue> "+
@@ -152,32 +153,5 @@ func nextmeetup(ID int64, client mongo.Client) {
 			data.Name + "\n" + "Date -" + "\t" + timeString + "\n" + "Time -" + "\t" +
 			data.Date.In(location).Format("15:04") + "\n" + "Venue -" + "\t" + data.Venue
 		bot.Send(tbot.NewMessage(ID, nxtMeetupData))
-	}
-}
-
-func reminder(ID int64, client mongo.Client, s1 *gocron.Scheduler) {
-	collection := client.Database("test").Collection("meetups")
-	var data meetupdata
-	err := collection.FindOne(context.TODO(), bson.M{}).Decode(&data)
-	if err != nil {
-		log.Fatal(err)
-	}
-	location, err := time.LoadLocation("Asia/Kolkata")
-	if err != nil {
-		log.Print(err)
-		bot.Send(tbot.NewMessage(ID, "Couldn't detect the timezone while processing the reminder, please try again"))
-	}
-	//reminder will be sent only if the the meetup is today
-	if time.Now().In(location).Day() == data.Date.Day() {
-		//the string inside Format method is a sample string to specify the display
-		//format of meetupTimeString
-		timeString := data.Date.In(location).Format("Mon _2 Jan 2006")
-		nxtMeetupData := "MEETUP REMINDER!" + "\n" + "Title -" + "\t" +
-			data.Name + "\n" + "Date -" + "\t" + timeString + "\n" + "Time -" +
-			"\t" + data.Date.In(location).Format("15:04") + "\n" +
-			"Venue -" + "\t" + data.Venue
-		bot.Send(tbot.NewMessage(ID, nxtMeetupData))
-		//stops the scheduler when reminder is sent
-		s1.Clear()
 	}
 }
